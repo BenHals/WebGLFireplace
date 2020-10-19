@@ -1,175 +1,184 @@
 // Adapted from webgl2fundamentals.org
-let wind = -1.0;
-let falloff = 0.2;
+let wind = -0.0;
+let falloff = 0.1;
+let time_scale = 0.005;
+let x_scale = 0.5;
 let fps = 50;
+let pixel_size = 50;
 let last_frame = undefined;
+
+let canvas = undefined;
+let gl = undefined;
+
+let vertexShaderSourceCreate = `#version 300 es
+    
+in vec4 a_position;
+in vec2 a_texCoord;
+
+out vec2 v_texCoord;
+
+void main() {
+
+gl_Position = a_position;
+v_texCoord = a_texCoord;
+}
+`;
+let fragmentShaderSourceCreate = `#version 300 es
+
+precision highp float;
+
+in vec2 v_texCoord;
+
+uniform vec2 u_resolution;
+
+uniform sampler2D u_image;
+
+uniform float t;
+
+uniform float falloff;
+
+uniform float wind;
+uniform float time_scale;
+uniform float x_scale;
+
+out vec4 outColor;
+
+float rand(float n){return fract(sin(n) * 43758.5453123);}
+// Noise
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+vec3 fade(vec3 t) { return t*t*t*(t*(t*6.0-15.0)+10.0); }
+float noise(vec3 P) {
+    vec3 i0 = mod289(floor(P)), i1 = mod289(i0 + vec3(1.0));
+    vec3 f0 = fract(P), f1 = f0 - vec3(1.0), f = fade(f0);
+    vec4 ix = vec4(i0.x, i1.x, i0.x, i1.x), iy = vec4(i0.yy, i1.yy);
+    vec4 iz0 = i0.zzzz, iz1 = i1.zzzz;
+    vec4 ixy = permute(permute(ix) + iy), ixy0 = permute(ixy + iz0), ixy1 = permute(ixy + iz1);
+    vec4 gx0 = ixy0 * (1.0 / 7.0), gy0 = fract(floor(gx0) * (1.0 / 7.0)) - 0.5;
+    vec4 gx1 = ixy1 * (1.0 / 7.0), gy1 = fract(floor(gx1) * (1.0 / 7.0)) - 0.5;
+    gx0 = fract(gx0); gx1 = fract(gx1);
+    vec4 gz0 = vec4(0.5) - abs(gx0) - abs(gy0), sz0 = step(gz0, vec4(0.0));
+    vec4 gz1 = vec4(0.5) - abs(gx1) - abs(gy1), sz1 = step(gz1, vec4(0.0));
+    gx0 -= sz0 * (step(0.0, gx0) - 0.5); gy0 -= sz0 * (step(0.0, gy0) - 0.5);
+    gx1 -= sz1 * (step(0.0, gx1) - 0.5); gy1 -= sz1 * (step(0.0, gy1) - 0.5);
+    vec3 g0 = vec3(gx0.x,gy0.x,gz0.x), g1 = vec3(gx0.y,gy0.y,gz0.y),
+        g2 = vec3(gx0.z,gy0.z,gz0.z), g3 = vec3(gx0.w,gy0.w,gz0.w),
+        g4 = vec3(gx1.x,gy1.x,gz1.x), g5 = vec3(gx1.y,gy1.y,gz1.y),
+        g6 = vec3(gx1.z,gy1.z,gz1.z), g7 = vec3(gx1.w,gy1.w,gz1.w);
+    vec4 norm0 = taylorInvSqrt(vec4(dot(g0,g0), dot(g2,g2), dot(g1,g1), dot(g3,g3)));
+    vec4 norm1 = taylorInvSqrt(vec4(dot(g4,g4), dot(g6,g6), dot(g5,g5), dot(g7,g7)));
+    g0 *= norm0.x; g2 *= norm0.y; g1 *= norm0.z; g3 *= norm0.w;
+    g4 *= norm1.x; g6 *= norm1.y; g5 *= norm1.z; g7 *= norm1.w;
+    vec4 nz = mix(vec4(dot(g0, vec3(f0.x, f0.y, f0.z)), dot(g1, vec3(f1.x, f0.y, f0.z)),
+        dot(g2, vec3(f0.x, f1.y, f0.z)), dot(g3, vec3(f1.x, f1.y, f0.z))),
+        vec4(dot(g4, vec3(f0.x, f0.y, f1.z)), dot(g5, vec3(f1.x, f0.y, f1.z)),
+            dot(g6, vec3(f0.x, f1.y, f1.z)), dot(g7, vec3(f1.x, f1.y, f1.z))), f.z);
+    return 2.2 * mix(mix(nz.x,nz.z,f.y), mix(nz.y,nz.w,f.y), f.x);
+}
+float noise(vec2 P) { return noise(vec3(P, 0.0)); }
+// float noise(vec2 P) {return rand(P.x*P.y);}
+void main() {
+    vec4 texCol = texture(u_image, v_texCoord);
+    vec4 oC;
+    float x_cell = floor(v_texCoord.x * u_resolution.x);
+    // float time_scale = 0.01;
+    // float x_scale = 0.07;
+    if(floor(v_texCoord.y * u_resolution.y) == 0.0){
+        // oC = vec4(0.5 + 0.5*rand(t+floor(v_texCoord.x * u_resolution.x)), 0, 0, 1);
+        oC = vec4(mix(1.0, noise(vec2(t*time_scale, x_cell*x_scale)), 0.3), 0, 0, 1);
+    } else {
+        // float flux = rand(t+floor(v_texCoord.x * u_resolution.x));
+        float flux = fract(noise(vec2(t*time_scale, x_cell*x_scale)));
+        float flux_mag = noise(vec2(t*time_scale, x_cell*x_scale))*3.0;
+        // float flux_mag = rand(t+floor(v_texCoord.x * u_resolution.x + 1.0)) * 3.0;
+        // float flux = 1.0;
+        vec4 below_l_tex = texture(u_image, vec2(fract(v_texCoord.x - ((wind-(1.0 * flux_mag))*(1.0/u_resolution.x))), fract(v_texCoord.y-(1.0/u_resolution.y))));
+        vec4 below_m_tex = texture(u_image, vec2(fract(v_texCoord.x - ((wind)*(1.0/u_resolution.x))), fract(v_texCoord.y-(1.0/u_resolution.y))));
+        vec4 below_r_tex = texture(u_image, vec2(fract(v_texCoord.x - ((wind+(1.0 * flux_mag))*(1.0/u_resolution.x))), fract(v_texCoord.y-(1.0/u_resolution.y))));
+        // vec4 below_tex_less = texture(u_image, vec2(fract(v_texCoord.x - ((wind-1.0)*(1.0/u_resolution.x))), fract(v_texCoord.y-(1.0/u_resolution.y))));
+        vec4 last_col = below_m_tex;
+        if(flux < 0.2){
+            last_col = mix(last_col, below_l_tex, (0.2-flux)/0.2);
+        }else if (flux > 0.8){
+            last_col = mix(last_col, below_r_tex, (flux-0.8)/0.2);
+        }
+        // vec4 last_col = mix(below_tex, below_tex_less, 0.7);
+        // vec4 last_col = mix(below_l_tex, below_r_tex, 0.5);
+        // last_col = mix(last_col, below_m_tex, 0.3);
+
+        oC = mix(last_col, vec4(0, 0, 0, 1), mix(falloff, flux*-1.0, 0.0));
+    }
+    outColor = oC;
+}
+`;
+let vertexShaderSourceCopy = `#version 300 es
+
+in vec4 a_position;
+in vec2 a_texCoord;
+
+out vec2 v_texCoord;
+
+void main() {
+
+gl_Position = a_position;
+v_texCoord = a_texCoord;
+}
+`;
+
+let fragmentShaderSourceCopy = `#version 300 es
+
+precision highp float;
+
+in vec2 v_texCoord;
+
+uniform vec2 u_resolution;
+
+uniform sampler2D u_image;
+
+out vec4 outColor;
+
+vec3 FIRE_COLORS[15] = vec3[](vec3(0.0, 0.0, 0.0),
+vec3(0.160, 0.054, 0.003),
+vec3(0.278, 0.070, 0.015),
+vec3(0.403, 0.070, 0.023),
+vec3(0.529, 0.066, 0.023),
+vec3(0.662, 0.050, 0.019),
+vec3(0.8, 0.023, 0.011),
+vec3(0.929, 0.003, 0.003),
+vec3(1, 0.239, 0.003),
+vec3(1, 0.435, 0.098),
+vec3(1, 0.572, 0.215),
+vec3(1, 0.694, 0.356),
+vec3(1, 0.8, 0.513),
+vec3(1, 0.901, 0.690),
+vec3(1.0, 1.0, 0.878));
+
+void main() {
+vec4 texCol = texture(u_image, v_texCoord);
+// outColor = vec4(texCol.xyzw);
+float col_prop = texture(u_image, v_texCoord).x * 30.0;
+if (col_prop > 30.0){
+    outColor = vec4(1, 1, 1, 1);
+}else{
+    int col_index = int(floor(col_prop));
+    int col_index_up = int(ceil(col_prop));
+    float mix_prop = col_prop - floor(col_prop);
+    outColor = mix(vec4(FIRE_COLORS[col_index], 1.0), vec4(FIRE_COLORS[col_index_up], 1.0), mix_prop);
+}
+// outColor = vec4(texCol.xyzw);
+}
+`;
 
 window.onload = function() {
     var canvas = document.querySelector('#canvas');
     var gl = canvas.getContext('webgl2');
     if (!gl){alert("WebGL2 not available");}
 
-    var vertexShaderSourceCreate = `#version 300 es
-    
-    in vec4 a_position;
-    in vec2 a_texCoord;
 
-    out vec2 v_texCoord;
-    
-    void main() {
-    
-    gl_Position = a_position;
-    v_texCoord = a_texCoord;
-    }
-    `;
-    var fragmentShaderSourceCreate = `#version 300 es
-    
-    precision highp float;
 
-    in vec2 v_texCoord;
 
-    uniform vec2 u_resolution;
-
-    uniform sampler2D u_image;
-
-    uniform float t;
-
-    uniform float falloff;
-
-    uniform float wind;
-    
-    out vec4 outColor;
-    
-    float rand(float n){return fract(sin(n) * 43758.5453123);}
-
-    void main() {
-        vec4 texCol = texture(u_image, v_texCoord);
-        vec4 oC;
-        if(floor(v_texCoord.y * u_resolution.y) == 0.0){
-            oC = vec4(0.5 + 0.5*rand(t+floor(v_texCoord.x * u_resolution.x)), 0, 0, 1);
-        } else {
-            float flux = rand(t+floor(v_texCoord.x * u_resolution.x));
-            float flux_mag = rand(t+floor(v_texCoord.x * u_resolution.x + 1.0)) * 3.0;
-            // float flux = 1.0;
-            vec4 below_l_tex = texture(u_image, vec2(fract(v_texCoord.x - ((wind-(1.0 * flux_mag))*(1.0/u_resolution.x))), fract(v_texCoord.y-(1.0/u_resolution.y))));
-            vec4 below_m_tex = texture(u_image, vec2(fract(v_texCoord.x - ((wind)*(1.0/u_resolution.x))), fract(v_texCoord.y-(1.0/u_resolution.y))));
-            vec4 below_r_tex = texture(u_image, vec2(fract(v_texCoord.x - ((wind+(1.0 * flux_mag))*(1.0/u_resolution.x))), fract(v_texCoord.y-(1.0/u_resolution.y))));
-            // vec4 below_tex_less = texture(u_image, vec2(fract(v_texCoord.x - ((wind-1.0)*(1.0/u_resolution.x))), fract(v_texCoord.y-(1.0/u_resolution.y))));
-            vec4 last_col = below_m_tex;
-            if(flux < 0.3){
-                last_col = mix(last_col, below_l_tex, (flux-0.0)/0.5);
-            }else if (flux > 0.7){
-                last_col = mix(last_col, below_r_tex, (flux-0.5)/0.5);
-            }
-            // vec4 last_col = mix(below_tex, below_tex_less, 0.7);
-            // vec4 last_col = mix(below_l_tex, below_r_tex, 0.5);
-            // last_col = mix(last_col, below_m_tex, 0.3);
-
-            oC = mix(last_col, vec4(0, 0, 0, 1), falloff);
-        }
-        outColor = oC;
-    }
-    `;
-    var vertexShaderSourceCopy = `#version 300 es
-    
-    in vec4 a_position;
-    in vec2 a_texCoord;
-
-    out vec2 v_texCoord;
-    
-    void main() {
-    
-    gl_Position = a_position;
-    v_texCoord = a_texCoord;
-    }
-    `;
-    
-    var fragmentShaderSourceCopy = `#version 300 es
-    
-    precision highp float;
-
-    in vec2 v_texCoord;
-
-    uniform vec2 u_resolution;
-
-    uniform sampler2D u_image;
-    
-    out vec4 outColor;
-    
-    vec3 FIRE_COLORS[15] = vec3[](vec3(0.0, 0.0, 0.0),
-    vec3(0.160, 0.054, 0.003),
-    vec3(0.278, 0.070, 0.015),
-    vec3(0.403, 0.070, 0.023),
-    vec3(0.529, 0.066, 0.023),
-    vec3(0.662, 0.050, 0.019),
-    vec3(0.8, 0.023, 0.011),
-    vec3(0.929, 0.003, 0.003),
-    vec3(1, 0.239, 0.003),
-    vec3(1, 0.435, 0.098),
-    vec3(1, 0.572, 0.215),
-    vec3(1, 0.694, 0.356),
-    vec3(1, 0.8, 0.513),
-    vec3(1, 0.901, 0.690),
-    vec3(1.0, 1.0, 0.878));
-
-    void main() {
-    vec4 texCol = texture(u_image, v_texCoord);
-    // outColor = vec4(texCol.xyzw);
-    float col_prop = texture(u_image, v_texCoord).x * 30.0;
-    if (col_prop > 30.0){
-        outColor = vec4(1, 1, 1, 1);
-    }else{
-        int col_index = int(floor(col_prop));
-        int col_index_up = int(ceil(col_prop));
-        float mix_prop = col_prop - floor(col_prop);
-        outColor = mix(vec4(FIRE_COLORS[col_index], 1.0), vec4(FIRE_COLORS[col_index_up], 1.0), mix_prop);
-    }
-    // outColor = vec4(texCol.xyzw);
-    }
-    `;
-
-    // Compile shaders from string.
-    function createShader(gl, type, source) {
-        let shader = gl.createShader(type);
-        gl.shaderSource(shader, source);
-        gl.compileShader(shader);
-        let success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
-        if (success) {
-        return shader;
-        }
-    
-        console.log(gl.getShaderInfoLog(shader));
-        gl.deleteShader(shader);
-    }
-
-    //Create program with vertex and fragment shaders.
-    function createProgram(gl, vertexShader, fragmentShader) {
-        let program = gl.createProgram();
-        gl.attachShader(program, vertexShader);
-        gl.attachShader(program, fragmentShader);
-        gl.linkProgram(program);
-        let success = gl.getProgramParameter(program, gl.LINK_STATUS);
-        if (success) {
-        return program;
-        }
-    
-        console.log(gl.getProgramInfoLog(program));
-        gl.deleteProgram(program);
-    }
-    function resize(canvas) {
-        // Lookup the size the browser is displaying the canvas.
-        var displayWidth  = canvas.clientWidth;
-        var displayHeight = canvas.clientHeight;
-       
-        // Check if the canvas is not the same size.
-        if (canvas.width  !== displayWidth ||
-            canvas.height !== displayHeight) {
-       
-          // Make the canvas the same size
-          canvas.width  = displayWidth;
-          canvas.height = displayHeight;
-        }
-      }
 
     let vertexCreateShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSourceCreate);
     let vertexCopyShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSourceCopy);
@@ -183,6 +192,8 @@ window.onload = function() {
     let saveTextureLoc = gl.getUniformLocation(programCreate, "u_image");
     let tLoc = gl.getUniformLocation(programCreate, "t");
     let falloffLoc = gl.getUniformLocation(programCreate, "falloff");
+    let timeScaleLoc = gl.getUniformLocation(programCreate, "time_scale");
+    let xScaleLoc = gl.getUniformLocation(programCreate, "x_scale");
     let windLoc = gl.getUniformLocation(programCreate, "wind");
     let positionAttributeLocationCopy = gl.getAttribLocation(programCopy, "a_position");
     let texCoordAttributeLocationCopy = gl.getAttribLocation(programCopy, "a_texCoord");
@@ -239,8 +250,8 @@ window.onload = function() {
     gl.activeTexture(gl.TEXTURE0 + 0);
 
     // Create a texture.
-    var tex_width = 50;
-    var tex_height = 50;
+    var tex_width = pixel_size;
+    var tex_height = pixel_size;
     var texture_a = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture_a);
     {
@@ -315,7 +326,12 @@ window.onload = function() {
     document.onkeypress = function(e){
         e = e || window.event;
 		let key_pressed = e.keyCode;
-		console.log(key_pressed);
+        console.log(key_pressed);
+        console.log(wind);
+        console.log(falloff);
+        console.log(x_scale);
+        console.log(time_scale);
+        console.log(fps);
 		if(key_pressed == 100){
 			wind += 1;
 		}
@@ -326,19 +342,29 @@ window.onload = function() {
 			falloff += 0.01;
 		}
 		if(key_pressed == 119){
-			falloff -= 0.01;
+            falloff -= 0.01;
+            falloff = Math.max(0, falloff);
 		}
-		// if(key_pressed == 114){
-		// 	falloff -= 2;
-		// }
-		// if(key_pressed == 102){
-		// 	falloff += 2;
-		// }
+		if(key_pressed == 114){
+            x_scale -= 0.01;
+            x_scale = Math.max(0, x_scale);
+		}
+		if(key_pressed == 102){
+            x_scale += 0.01;
+		}
+		if(key_pressed == 116){
+            time_scale -= 0.001;
+            time_scale = Math.max(0, time_scale);
+		}
+		if(key_pressed == 103){
+            time_scale += 0.001;
+		}
 		if(key_pressed == 122){
-			fps -= 2;
+            fps -= 1;
+            fps = Math.max(0, fps);
 		}
 		if(key_pressed == 120){
-			fps += 2;
+			fps += 1;
 		}
 	} 
     function draw_data(t){
@@ -366,6 +392,8 @@ window.onload = function() {
         gl.uniform2f(resolutionLocationCreate, tex_width, tex_height);
         gl.uniform1f(tLoc, t);
         gl.uniform1f(falloffLoc, falloff);
+        gl.uniform1f(timeScaleLoc, time_scale);
+        gl.uniform1f(xScaleLoc, x_scale);
         gl.uniform1f(windLoc, wind);
         gl.bindFramebuffer(gl.FRAMEBUFFER, new_fbo);
         gl.bindTexture(gl.TEXTURE_2D, old_tex)
@@ -391,3 +419,47 @@ window.onload = function() {
         requestAnimationFrame(draw_data)
      }
 }
+
+
+    // Compile shaders from string.
+    function createShader(gl, type, source) {
+        let shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        let success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+        if (success) {
+        return shader;
+        }
+    
+        console.log(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+    }
+
+    //Create program with vertex and fragment shaders.
+    function createProgram(gl, vertexShader, fragmentShader) {
+        let program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        let success = gl.getProgramParameter(program, gl.LINK_STATUS);
+        if (success) {
+        return program;
+        }
+    
+        console.log(gl.getProgramInfoLog(program));
+        gl.deleteProgram(program);
+    }
+    function resize(canvas) {
+        // Lookup the size the browser is displaying the canvas.
+        let displayWidth  = canvas.clientWidth;
+        let displayHeight = canvas.clientHeight;
+       
+        // Check if the canvas is not the same size.
+        if (canvas.width  !== displayWidth ||
+            canvas.height !== displayHeight) {
+       
+          // Make the canvas the same size
+          canvas.width  = displayWidth;
+          canvas.height = displayHeight;
+        }
+      }
