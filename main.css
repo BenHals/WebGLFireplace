@@ -8,7 +8,30 @@
     background-color: blanchedalmond;
     padding: 0.5em;
 }
+#sliders{
+    display: block;
+}
+.largesize {
+    width: 100%;
+}
+.largesize input {
+    width: 80%;
+}
+.smallsize #sliders{
+    display: none;
+}
+#maximizer{
+    display: block;
+    float: right;
+    width: 2em;
+    height: 2em;
+    background-color: cadetblue;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
 body {
     padding: 0px;
     margin: 0px;
+    width:100%;
 }

@@ -10,6 +10,8 @@ let last_frame = undefined;
 let canvas = undefined;
 let gl = undefined;
 
+let controlSize = "mid";
+
 let vertexShaderSourceCreate = `#version 300 es
     
 in vec4 a_position;
@@ -191,6 +193,29 @@ function setupInput(){
     var fpsSlider = document.getElementById("fpsSlider");
     fpsSlider.oninput = function(){
         fps = fpsSlider.value;
+    }
+
+    var maxButton = document.getElementById("maximizer");
+    maxButton.onclick = function(){
+        let controls = document.getElementById("controls");
+        if(controlSize == "mid"){
+            controlSize = "large";
+            controls.classList.remove("smallsize");
+            controls.classList.remove("midsize");
+            controls.classList.add("largesize");
+        }else if(controlSize == "large"){
+            controlSize = "small";
+            controls.classList.add("smallsize");
+            controls.classList.remove("midsize");
+            controls.classList.remove("largesize");
+            
+        }else{
+            controlSize = "mid";
+            controls.classList.remove("smallsize");
+            controls.classList.add("midsize");
+            controls.classList.remove("largesize");
+
+        }
     }
     document.onkeypress = function(e){
         e = e || window.event;
