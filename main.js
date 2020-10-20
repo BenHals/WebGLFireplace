@@ -171,10 +171,91 @@ if (col_prop > 30.0){
 }
 `;
 
+function setupInput(){
+    var falloffSlider = document.getElementById("falloffSlider");
+    falloffSlider.oninput = function(){
+        falloff = falloffSlider.value;
+    }
+    var windSlider = document.getElementById("windSlider");
+    windSlider.oninput = function(){
+        wind = windSlider.value;
+    }
+    var flareScaleSlider = document.getElementById("flareScaleSlider");
+    flareScaleSlider.oninput = function(){
+        x_scale = flareScaleSlider.value;
+    }
+    var timeScaleSlider = document.getElementById("timeScaleSlider");
+    timeScaleSlider.oninput = function(){
+        time_scale = timeScaleSlider.value;
+    }
+    var fpsSlider = document.getElementById("fpsSlider");
+    fpsSlider.oninput = function(){
+        fps = fpsSlider.value;
+    }
+    document.onkeypress = function(e){
+        e = e || window.event;
+		let key_pressed = e.keyCode;
+        console.log(key_pressed);
+        console.log(wind);
+        console.log(falloff);
+        console.log(x_scale);
+        console.log(time_scale);
+        console.log(fps);
+		if(key_pressed == 100){
+            wind += 1;
+            windSlider.value = wind;
+		}
+		if(key_pressed == 97){
+            wind -= 1;
+            windSlider.value = wind;
+		}
+		if(key_pressed == 115){
+            falloff += 0.01;
+            falloffSlider.value = falloff;
+		}
+		if(key_pressed == 119){
+            falloff -= 0.01;
+            falloff = Math.max(0, falloff);
+            falloffSlider.value = falloff;
+		}
+		if(key_pressed == 114){
+            x_scale -= 0.01;
+            x_scale = Math.max(0, x_scale);
+            flareScaleSlider.value = x_scale;
+		}
+		if(key_pressed == 102){
+            x_scale += 0.01;
+            flareScaleSlider.value = x_scale;
+		}
+		if(key_pressed == 116){
+            time_scale -= 0.001;
+            time_scale = Math.max(0, time_scale);
+            timeScaleSlider.value = time_scale;
+		}
+		if(key_pressed == 103){
+            time_scale += 0.001;
+            timeScaleSlider.value = time_scale;
+		}
+		if(key_pressed == 122){
+            fps -= 1;
+            fps = Math.max(0, fps);
+            fpsSlider.value = fps;
+		}
+		if(key_pressed == 120){
+            fps += 1;
+            fpsSlider.value = fps;
+		}
+    } 
+    
+
+}
+
 window.onload = function() {
     var canvas = document.querySelector('#canvas');
     var gl = canvas.getContext('webgl2');
     if (!gl){alert("WebGL2 not available");}
+
+    setupInput();
 
 
 
@@ -323,50 +404,7 @@ window.onload = function() {
     var count = 0;
 
     draw_data();
-    document.onkeypress = function(e){
-        e = e || window.event;
-		let key_pressed = e.keyCode;
-        console.log(key_pressed);
-        console.log(wind);
-        console.log(falloff);
-        console.log(x_scale);
-        console.log(time_scale);
-        console.log(fps);
-		if(key_pressed == 100){
-			wind += 1;
-		}
-		if(key_pressed == 97){
-			wind -= 1;
-		}
-		if(key_pressed == 115){
-			falloff += 0.01;
-		}
-		if(key_pressed == 119){
-            falloff -= 0.01;
-            falloff = Math.max(0, falloff);
-		}
-		if(key_pressed == 114){
-            x_scale -= 0.01;
-            x_scale = Math.max(0, x_scale);
-		}
-		if(key_pressed == 102){
-            x_scale += 0.01;
-		}
-		if(key_pressed == 116){
-            time_scale -= 0.001;
-            time_scale = Math.max(0, time_scale);
-		}
-		if(key_pressed == 103){
-            time_scale += 0.001;
-		}
-		if(key_pressed == 122){
-            fps -= 1;
-            fps = Math.max(0, fps);
-		}
-		if(key_pressed == 120){
-			fps += 1;
-		}
-	} 
+    
     function draw_data(t){
         let do_frame = false;
         if(!last_frame) {
