@@ -12,6 +12,19 @@ let gl = undefined;
 
 let controlSize = "mid";
 
+let program_copy = undefined;
+let locations_copy = new Map();
+let vao_copy= undefined;
+let program_create = undefined;
+let locations_create = new Map();
+let vao_create = undefined;
+let tex_height = undefined;
+let tex_width = undefined;
+let texture_a = undefined;
+let texture_b = undefined;
+let fbo_a = undefined;
+let fbo_b = undefined;
+let count = 0;
 let vertexShaderSourceCreate = `#version 300 es
     
 in vec4 a_position;
@@ -194,6 +207,11 @@ function setupInput(){
     fpsSlider.oninput = function(){
         fps = fpsSlider.value;
     }
+    var pixel_sizeSlider = document.getElementById("pixelSizeSlider");
+    pixel_sizeSlider.oninput = function(){
+        pixel_size = pixel_sizeSlider.value;
+        setupPrograms(pixel_size);
+    }
 
     var maxButton = document.getElementById("maximizer");
     maxButton.onclick = function(){
@@ -270,43 +288,53 @@ function setupInput(){
             fps += 1;
             fpsSlider.value = fps;
 		}
+		if(key_pressed == 99){
+            pixel_size -= 1;
+            pixel_size = Math.max(0, pixel_size);
+            pixel_sizeSlider.value = pixel_size;
+            setupPrograms(pixel_size);
+		}
+		if(key_pressed == 118){
+            pixel_size += 1;
+            pixel_sizeSlider.value = pixel_size;
+            setupPrograms(pixel_size);
+		}
     } 
-    
-
 }
 
-window.onload = function() {
-    var canvas = document.querySelector('#canvas');
-    var gl = canvas.getContext('webgl2');
-    if (!gl){alert("WebGL2 not available");}
+function setupPrograms(pixel_size){
+    // Compile shaders for creating temperature
+    let vertex_create_shader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSourceCreate);
+    let fragment_create_shader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSourceCreate);
 
-    setupInput();
+    // Compile shaders for copying temperature to canvas
+    let vertex_copy_shader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSourceCopy);
+    let fragment_copy_shader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSourceCopy);
 
+    // Create programs and get references to locations
+    program_create = createProgram(gl, vertex_create_shader, fragment_create_shader);
+    program_copy = createProgram(gl, vertex_copy_shader, fragment_copy_shader);
+    locations_create.set("a_position", gl.getAttribLocation(program_create, "a_position"));
+    locations_create.set("a_texCoord", gl.getAttribLocation(program_create, "a_texCoord"));
+    locations_create.set("u_resolution", gl.getUniformLocation(program_create, "u_resolution"));
+    locations_create.set("u_image", gl.getUniformLocation(program_create, "u_image"));
+    locations_create.set("t", gl.getUniformLocation(program_create, "t"));
+    locations_create.set("falloff", gl.getUniformLocation(program_create, "falloff"));
+    locations_create.set("time_scale", gl.getUniformLocation(program_create, "time_scale"));
+    locations_create.set("x_scale", gl.getUniformLocation(program_create, "x_scale"));
+    locations_create.set("wind", gl.getUniformLocation(program_create, "wind"));
+    locations_copy.set("a_position", gl.getAttribLocation(program_copy, "a_position"));
+    locations_copy.set("a_texCoord", gl.getAttribLocation(program_copy, "a_texCoord"));
+    locations_copy.set("u_resolution", gl.getUniformLocation(program_copy, "u_resolution"));
+    locations_copy.set("u_image", gl.getUniformLocation(program_copy, "u_image"));
 
+    // Create VAO for create program.
+    vao_create = gl.createVertexArray();
+    gl.bindVertexArray(vao_create);
 
-
-
-    let vertexCreateShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSourceCreate);
-    let vertexCopyShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSourceCopy);
-    let fragmentCreateShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSourceCreate);
-    let fragmentCopyShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSourceCopy);
-
-    var programCreate = createProgram(gl, vertexCreateShader, fragmentCreateShader);
-    var programCopy = createProgram(gl, vertexCopyShader, fragmentCopyShader);
-    let positionAttributeLocationCreate = gl.getAttribLocation(programCreate, "a_position");
-    let resolutionLocationCreate = gl.getUniformLocation(programCreate, "u_resolution");
-    let saveTextureLoc = gl.getUniformLocation(programCreate, "u_image");
-    let tLoc = gl.getUniformLocation(programCreate, "t");
-    let falloffLoc = gl.getUniformLocation(programCreate, "falloff");
-    let timeScaleLoc = gl.getUniformLocation(programCreate, "time_scale");
-    let xScaleLoc = gl.getUniformLocation(programCreate, "x_scale");
-    let windLoc = gl.getUniformLocation(programCreate, "wind");
-    let positionAttributeLocationCopy = gl.getAttribLocation(programCopy, "a_position");
-    let texCoordAttributeLocationCopy = gl.getAttribLocation(programCopy, "a_texCoord");
-    let resolutionLocationCopy = gl.getUniformLocation(programCopy, "u_resolution");
-    // let saveTextureLoc = gl.getUniformLocation(programCopy, "u_image");
-    let positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    // Create buffer for vertices, just a rectangle to cover screen.
+    let position_buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, position_buffer);
     let positions = [
         -1, -1,
         1, -1,
@@ -316,9 +344,7 @@ window.onload = function() {
         1, 1,
     ];
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
-    var vao = gl.createVertexArray();
-    gl.bindVertexArray(vao);
-    gl.enableVertexAttribArray(positionAttributeLocationCreate);
+    gl.enableVertexAttribArray(locations_create.get("a_position"));
     {
         let size = 2;          // 2 components per iteration
         let type = gl.FLOAT;   // the data is 32bit floats
@@ -326,10 +352,12 @@ window.onload = function() {
         let stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
         let buffer_offset = 0;        // start at the beginning of the buffer
         gl.vertexAttribPointer(
-            positionAttributeLocationCreate, size, type, normalize, stride, buffer_offset);
+            locations_create.get("a_position"), size, type, normalize, stride, buffer_offset);
     }
-    let texCoordBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+
+    // Create buffer for texture coordinates.
+    let texCoord_buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texCoord_buffer);
     let texCoords = [
         0.0, 0.0,
         1.0, 0.0,
@@ -339,7 +367,7 @@ window.onload = function() {
         1.0, 1.0,
     ];
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texCoords), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(texCoordAttributeLocationCopy);
+    gl.enableVertexAttribArray(locations_create.get("a_texCoord"));
     {
         let size = 2;          // 2 components per iteration
         let type = gl.FLOAT;   // the data is 32bit floats
@@ -347,18 +375,56 @@ window.onload = function() {
         let stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next texCoord
         let buffer_offset = 0;        // start at the beginning of the buffer
         gl.vertexAttribPointer(
-            texCoordAttributeLocationCopy, size, type, normalize, stride, buffer_offset);
+            locations_create.get("a_texCoord"), size, type, normalize, stride, buffer_offset);
     }
+    gl.bindVertexArray(null);
 
+    // Create VAO for copy program. Can reuse buffer data.
+    // We could share a VAO between programs because locations
+    // are the same, but that seems hacky.
+    vao_copy = gl.createVertexArray();
+    gl.bindVertexArray(vao_copy);
+    position_buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, position_buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(locations_copy.get("a_position"));
+    {
+        let size = 2;          // 2 components per iteration
+        let type = gl.FLOAT;   // the data is 32bit floats
+        let normalize = false; // don't normalize the data
+        let stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
+        let buffer_offset = 0;        // start at the beginning of the buffer
+        gl.vertexAttribPointer(
+            locations_copy.get("a_position"), size, type, normalize, stride, buffer_offset);
+    }
+    texCoord_buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texCoord_buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texCoords), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(locations_copy.get("a_texCoord"));
+    {
+        let size = 2;          // 2 components per iteration
+        let type = gl.FLOAT;   // the data is 32bit floats
+        let normalize = false; // don't normalize the data
+        let stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next texCoord
+        let buffer_offset = 0;        // start at the beginning of the buffer
+        gl.vertexAttribPointer(
+            locations_copy.get("a_texCoord"), size, type, normalize, stride, buffer_offset);
+    }
+    gl.bindVertexArray(null);
+
+    // Set canvas so num pixels = display size.
     resize(canvas);
-    // make unit 0 the active texture uint
-    // (ie, the unit all other texture commands will affect
+
+    // We will use the first texture slot.
     gl.activeTexture(gl.TEXTURE0 + 0);
 
     // Create a texture.
-    var tex_width = pixel_size;
-    var tex_height = pixel_size;
-    var texture_a = gl.createTexture();
+    // We will use two textures, swapping 
+    // between them each frame so one holds
+    // The last output and one is written to.
+    tex_width = pixel_size;
+    tex_height = pixel_size;
+    texture_a = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture_a);
     {
         // Bind it to texture unit 0' 2D bind point
@@ -376,111 +442,119 @@ window.onload = function() {
         let srcFormat = gl.RGBA;        // format of data we are supplying
         let srcType = gl.UNSIGNED_BYTE  // type of data we are supplying
         let data = null;                // no data = create a blank texture
-        // let tex_width = gl.canvas.width;
-        // let tex_height = gl.canvas.height;
-        gl.texImage2D(
-            gl.TEXTURE_2D, mipLevel, internalFormat, tex_width, tex_height, border,
-            srcFormat, srcType, data);
-        }
-        // Create a texture.
-        var texture_b = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, texture_b);
-        {
-            // Bind it to texture unit 0' 2D bind point
-            // Set the parameters so we don't need mips and so we're not filtering
-            // and we don't repeat
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-            
-            // make the texture the same size as the image
-            let mipLevel = 0;               // the largest mip
-            let internalFormat = gl.RGBA;   // format we want in the texture
-            let border = 0;                 // must be 0
-            let srcFormat = gl.RGBA;        // format of data we are supplying
-            let srcType = gl.UNSIGNED_BYTE  // type of data we are supplying
-            let data = null;                // no data = create a blank texture
         gl.texImage2D(
             gl.TEXTURE_2D, mipLevel, internalFormat, tex_width, tex_height, border,
             srcFormat, srcType, data);
     }
-
+    // Create a texture.
+    texture_b = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture_b);
+    {
+        // Bind it to texture unit 0' 2D bind point
+        // Set the parameters so we don't need mips and so we're not filtering
+        // and we don't repeat
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        
+        // make the texture the same size as the image
+        let mipLevel = 0;               // the largest mip
+        let internalFormat = gl.RGBA;   // format we want in the texture
+        let border = 0;                 // must be 0
+        let srcFormat = gl.RGBA;        // format of data we are supplying
+        let srcType = gl.UNSIGNED_BYTE  // type of data we are supplying
+        let data = null;                // no data = create a blank texture
+    gl.texImage2D(
+        gl.TEXTURE_2D, mipLevel, internalFormat, tex_width, tex_height, border,
+        srcFormat, srcType, data);
+    }
          
-    // Create a framebuffer
-    var fbo_b = gl.createFramebuffer();
+    // Create Framebuffers to write to 
+    // each texture.
+    fbo_b = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo_b);
- 
-    // Attach a texture to it.
     let attachmentPoint = gl.COLOR_ATTACHMENT0;
     let mipLevel = 0;
     gl.framebufferTexture2D(
         gl.FRAMEBUFFER, attachmentPoint, gl.TEXTURE_2D, texture_b, mipLevel);
-    // Create a framebuffer
-    var fbo_a = gl.createFramebuffer();
+
+    fbo_a = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo_a);
- 
-    // Attach a texture to it.
     attachmentPoint = gl.COLOR_ATTACHMENT0;
     mipLevel = 0;
     gl.framebufferTexture2D(
         gl.FRAMEBUFFER, attachmentPoint, gl.TEXTURE_2D, texture_a, mipLevel);
+}
 
-    var count = 0;
+function draw_data(t){
 
-    draw_data();
+    // Draw at specified FPS.
+    let do_frame = false;
+    if(!last_frame) {
+        do_frame = true;
+    }else if(t - last_frame >= 1000 / fps){
+        do_frame = true;
+    }
+    if(!do_frame){
+        requestAnimationFrame(draw_data);
+        return;
+    }
+
+
+    gl.viewport(0, 0, tex_width, tex_height);
+    gl.clearColor(1, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     
-    function draw_data(t){
-        let do_frame = false;
-        if(!last_frame) {
-            do_frame = true;
-        }else if(t - last_frame >= 1000 / fps){
-            do_frame = true;
-        }
-        if(!do_frame){
-            requestAnimationFrame(draw_data);
-            return;
-        }
-        gl.viewport(0, 0, tex_width, tex_height);
-        gl.clearColor(1, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        
-        let new_tex = count % 2 == 0 ? texture_b : texture_a;
-        let old_tex = count % 2 == 0 ? texture_a : texture_b;
-        let new_fbo = count % 2 == 0 ? fbo_b : fbo_a;
-        
-        gl.useProgram(programCreate);
-        gl.bindVertexArray(vao);
-        gl.uniform1i(saveTextureLoc, 0);
-        gl.uniform2f(resolutionLocationCreate, tex_width, tex_height);
-        gl.uniform1f(tLoc, t);
-        gl.uniform1f(falloffLoc, falloff);
-        gl.uniform1f(timeScaleLoc, time_scale);
-        gl.uniform1f(xScaleLoc, x_scale);
-        gl.uniform1f(windLoc, wind);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, new_fbo);
-        gl.bindTexture(gl.TEXTURE_2D, old_tex)
-        let primitiveType = gl.TRIANGLES;
-        let offset = 0;
-        let num_vertex = 6;
-        gl.drawArrays(primitiveType, offset, num_vertex);
-        
-        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-        gl.useProgram(programCopy);
-        gl.bindVertexArray(vao);
-        // start with the original image on unit 0
-        gl.activeTexture(gl.TEXTURE0 + 0);
-        gl.bindTexture(gl.TEXTURE_2D, new_tex);
-        
-        // Tell the shader to get the texture from texture unit 0
-        gl.uniform1i(saveTextureLoc, 0);
-        gl.uniform2f(resolutionLocationCopy, gl.canvas.width, gl.canvas.height);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.drawArrays(primitiveType, offset, num_vertex);
-        count+= 1
-        last_frame = t;
-        requestAnimationFrame(draw_data)
-     }
+    // Figure out which texture and framebuffer
+    // this frame needs.
+    let new_tex = count % 2 == 0 ? texture_b : texture_a;
+    let old_tex = count % 2 == 0 ? texture_a : texture_b;
+    let new_fbo = count % 2 == 0 ? fbo_b : fbo_a;
+    
+    // Setup first program to create temp texture
+    gl.bindVertexArray(vao_create);
+    gl.useProgram(program_create);
+    gl.uniform1i(locations_create.get('u_image'), 0);
+    gl.uniform2f(locations_create.get('u_resolution'), tex_width, tex_height);
+    gl.uniform1f(locations_create.get('t'), t);
+    gl.uniform1f(locations_create.get('falloff'), falloff);
+    gl.uniform1f(locations_create.get('time_scale'), time_scale);
+    gl.uniform1f(locations_create.get('x_scale'), x_scale);
+    gl.uniform1f(locations_create.get('wind'), wind);
+    // The FBO we picked draws to new_tex
+    gl.bindFramebuffer(gl.FRAMEBUFFER, new_fbo);
+    // We will base on old_tex
+    gl.bindTexture(gl.TEXTURE_2D, old_tex)
+    let primitiveType = gl.TRIANGLES;
+    let offset = 0;
+    let num_vertex = 6;
+    gl.drawArrays(primitiveType, offset, num_vertex);
+    
+    // Use copy program to copy new_tex to canvas
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    gl.useProgram(program_copy);
+    gl.bindVertexArray(vao_copy);
+    gl.activeTexture(gl.TEXTURE0 + 0);
+    gl.bindTexture(gl.TEXTURE_2D, new_tex);
+    gl.uniform1i(locations_copy.get('u_image'), 0);
+    gl.uniform2f(locations_copy.get('u_resolution'), gl.canvas.width, gl.canvas.height);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.drawArrays(primitiveType, offset, num_vertex);
+
+    // Update count so we swap textures next frame.
+    count+= 1
+    last_frame = t;
+    requestAnimationFrame(draw_data)
+ }
+window.onload = function() {
+    canvas = document.querySelector('#canvas');
+    gl = canvas.getContext('webgl2');
+    if (!gl){alert("WebGL2 not available");}
+
+    setupInput();
+    setupPrograms(pixel_size);
+    draw_data();
 }
 
 
